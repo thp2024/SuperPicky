@@ -321,7 +321,6 @@ class DetailPanel(QWidget):
             ("browser.meta_aesthetic",  self._val_aesthetic),
             ("browser.meta_flying",     self._val_flying),
             ("browser.meta_species",    self._val_species),
-            ("browser.meta_caption",    self._val_caption),
             ("browser.meta_camera",     self._val_camera),
             ("browser.meta_lens",       self._val_lens),
             ("browser.meta_shutter",    self._val_shutter),
@@ -336,6 +335,38 @@ class DetailPanel(QWidget):
 
         meta_layout.addLayout(form)
         meta_layout.addStretch()
+
+        # --- 折叠式选片备注（默认收起，点箭头展开）---
+        meta_layout.addWidget(self._divider())
+
+        self._caption_expanded = False
+
+        self._caption_toggle_btn = QPushButton()
+        self._caption_toggle_btn.setFlat(True)
+        self._caption_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._caption_toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {COLORS['text_tertiary']};
+                font-size: 11px;
+                background: transparent;
+                border: none;
+                text-align: left;
+                padding: 4px 0px;
+            }}
+            QPushButton:hover {{ color: {COLORS['text_secondary']}; }}
+        """)
+        self._caption_toggle_btn.clicked.connect(self._toggle_caption)
+        meta_layout.addWidget(self._caption_toggle_btn)
+
+        self._caption_content = QWidget()
+        self._caption_content.setVisible(False)
+        caption_inner = QVBoxLayout(self._caption_content)
+        caption_inner.setContentsMargins(0, 2, 0, 6)
+        caption_inner.setSpacing(0)
+        caption_inner.addWidget(self._val_caption)
+        meta_layout.addWidget(self._caption_content)
+
+        self._update_caption_toggle_label()
 
         meta_scroll.setWidget(meta_container)
         layout.addWidget(meta_scroll, 1)
@@ -387,10 +418,23 @@ class DetailPanel(QWidget):
         ):
             val.setText("—")
         self._rating_label.setText("—")
+        self._caption_content.setVisible(False)
+        self._caption_expanded = False
+        self._update_caption_toggle_label()
 
     # ------------------------------------------------------------------
     #  内部
     # ------------------------------------------------------------------
+
+    def _toggle_caption(self):
+        self._caption_expanded = not self._caption_expanded
+        self._caption_content.setVisible(self._caption_expanded)
+        self._update_caption_toggle_label()
+
+    def _update_caption_toggle_label(self):
+        arrow = "▼" if self._caption_expanded else "▶"
+        label = self.i18n.t("browser.meta_caption")
+        self._caption_toggle_btn.setText(f"{arrow} {label}")
 
     def _on_rating_dec(self):
         """▼ 按钮：评分 -1（最低 -1）。"""
@@ -673,7 +717,8 @@ class DetailPanel(QWidget):
             dt = dt[:19]
         self._val_datetime.setText(dt)
 
-        # 选片备注（EXIF caption）
+        # 选片备注（折叠区）
         cap = p.get("caption") or _unknown
         self._val_caption.setText(cap)
         self._val_caption.setToolTip(cap)
+        self._update_caption_toggle_label()

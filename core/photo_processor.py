@@ -2019,7 +2019,7 @@ class PhotoProcessor:
                 self._update_csv_keypoint_data(
                     original_prefix,
                     head_sharpness,  # V4.1: 原始头部锐度
-                    has_visible_eye, 
+                    has_visible_eye,
                     has_visible_beak,
                     left_eye_vis,
                     right_eye_vis,
@@ -2034,6 +2034,7 @@ class PhotoProcessor:
                     adj_sharpness_csv,  # V4.1: 调整后锐度
                     adj_topiq_csv,  # V4.1: 调整后美学
                     prefetched_exif,  # V2: EXIF 元数据
+                    caption,  # V4.1: 评分说明
                 )
                 add_photo_stage('csv_update', (time.time() - csv_update_start) * 1000)
                 
@@ -2304,8 +2305,8 @@ class PhotoProcessor:
             self.stats['exposure_issue'] += 1
     
     def _update_csv_keypoint_data(
-            self, 
-            filename: str, 
+            self,
+            filename: str,
             head_sharpness: float,
             has_visible_eye: bool,
             has_visible_beak: bool,
@@ -2321,7 +2322,8 @@ class PhotoProcessor:
             focus_y: float = None,  # V3.9: 对焦点Y坐标
             adj_sharpness: float = None,  # V4.1: 调整后锐度
             adj_topiq: float = None,  # V4.1: 调整后美学
-            exif_data: dict = None  # V2: EXIF 元数据
+            exif_data: dict = None,  # V2: EXIF 元数据
+            caption: str = None,  # V4.1: 评分说明
     ):
         """更新报告数据库中的关键点数据和评分（SQLite 版本）"""
         if self.report_db is None:
@@ -2342,11 +2344,15 @@ class PhotoProcessor:
             'adj_sharpness': adj_sharpness,
             'adj_topiq': adj_topiq,
         }
-        
-        # V2: 合并 EXIF 元数据
+
+        # V2: 合并 EXIF 元数据（先合并，再覆盖 caption，避免 exif_data 里的空值覆盖评分说明）
         if exif_data:
             data.update(exif_data)
-        
+
+        # caption 最后写入，确保不被 exif_data 里的空 Caption-Abstract 覆盖
+        if caption is not None:
+            data['caption'] = caption
+
         self.report_db.update_photo(filename, data)
     
     # _load_csv_cache 和 _flush_csv_cache 已被 SQLite (ReportDB) 替代
