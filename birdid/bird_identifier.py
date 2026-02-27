@@ -415,12 +415,56 @@ def load_image(image_path: str) -> Image.Image:
                     img = Image.fromarray(rgb)
                     print(_t("logs.raw_half_size", w=img.size[0], h=img.size[1]))
                     return img
+            except rawpy._rawpy.LibRawFileUnsupportedError:
+                # LibRaw 不支持的格式（如 Sony A7M5 NeXt/Compressed RAW 2）
+                # 回退：使用 exiftool -b -JpgFromRaw 提取相机内嵌 JPEG
+                print(f"[RAW] rawpy 不支持此 RAW 格式，尝试 ExifTool JpgFromRaw 回退...")
+                return _load_raw_via_exiftool(image_path)
             except Exception as e:
                 raise Exception(f"RAW处理失败: {e}")
         else:
             raise ImportError("需要安装 rawpy 来处理 RAW 格式")
     else:
         return Image.open(image_path).convert("RGB")
+
+
+def _load_raw_via_exiftool(image_path: str) -> "Image.Image":
+    """
+    使用 ExifTool 从 RAW 文件提取内嵌 JPEG。
+    用于 LibRaw 不支持的格式（如 Sony A7M5 NeXt/Compressed RAW 2）。
+    按优先级依次尝试：JpgFromRaw → PreviewImage → ThumbnailImage
+    """
+    import subprocess
+    from io import BytesIO
+
+    # 查找 exiftool（优先使用打包内的版本）
+    possible_paths = []
+    if getattr(sys, "frozen", False):
+        possible_paths.append(os.path.join(sys._MEIPASS, "exiftools_mac", "exiftool"))
+    possible_paths += [
+        os.path.join(PROJECT_ROOT, "exiftools_mac", "exiftool"),
+        "/opt/homebrew/bin/exiftool",
+        "/usr/local/bin/exiftool",
+        "exiftool",
+    ]
+    exiftool = next((p for p in possible_paths if os.path.isfile(p)), "exiftool")
+
+    # 依次尝试各种嵌入图像标签
+    for tag in ["-JpgFromRaw", "-PreviewImage", "-ThumbnailImage"]:
+        try:
+            result = subprocess.run(
+                [exiftool, "-b", tag, image_path],
+                capture_output=True, timeout=15
+            )
+            if result.returncode == 0 and result.stdout and len(result.stdout) > 1000:
+                img = Image.open(BytesIO(result.stdout)).convert("RGB")
+                print(f"[RAW] ExifTool {tag} 提取成功: {img.size[0]}x{img.size[1]}")
+                return img
+        except Exception as e:
+            print(f"[RAW] ExifTool {tag} 失败: {e}")
+            continue
+
+    raise Exception(f"无法用 ExifTool 提取 RAW 内嵌图像: {image_path}")
 
 
 # ==================== GPS 提取 ====================
