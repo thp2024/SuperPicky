@@ -64,9 +64,9 @@ Automatically set thresholds based on your experience:
 
 ### macOS
 **Apple Silicon (M1/M2/M3/M4) (v4.1.0 Beta)**
-- [GitHub Download](https://github.com/jamesphotography/SuperPicky/releases/download/v4.1.0/SuperPicky_v4.1.0.dmg)
-- [Google Drive (Mirror)](https://drive.google.com/file/d/1b_-GZOVO1VNrxIchGjIQ7-Sdd0TLfAFJ/view?usp=sharing)
-- [Baidu Netdisk](https://pan.baidu.com/s/1GPoCea9zmdVWAu9QbGawlQ?pwd=vffx) Code: vffx
+- [GitHub Download](https://github.com/jamesphotography/SuperPicky/releases/download/v4.1.0/SuperPicky_v4.1.0_arm64_9d7ea4a2.dmg)
+- [Google Drive (Mirror)](https://drive.google.com/file/d/1oH9FHGG7eyz7arGBW69BWzYr7-d4_FZh/view?usp=sharing)
+- [Baidu Netdisk](https://pan.baidu.com/s/1wNEghpd_upOqNxguP4zTyg?pwd=fmx3) Code: fmx3
 - [Quark](https://pan.quark.cn/s/46cf8ec8f063)
 
 **Intel (Pre-2020 Mac) (v4.1.0 Beta)**

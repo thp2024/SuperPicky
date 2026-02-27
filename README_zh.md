@@ -59,7 +59,7 @@
 
 ### macOS
 **Apple Silicon (M1/M2/M3/M4) (v4.1.0 Beta)**
-- [GitHub 下载](https://github.com/jamesphotography/SuperPicky/releases/download/v4.1.0/SuperPicky_v4.1.0.dmg) | [Google Drive](https://drive.google.com/file/d/1b_-GZOVO1VNrxIchGjIQ7-Sdd0TLfAFJ/view?usp=sharing) | [百度网盘](https://pan.baidu.com/s/1GPoCea9zmdVWAu9QbGawlQ?pwd=vffx) 提取码: vffx | [夸克网盘](https://pan.quark.cn/s/46cf8ec8f063)
+- [GitHub 下载](https://github.com/jamesphotography/SuperPicky/releases/download/v4.1.0/SuperPicky_v4.1.0_arm64_9d7ea4a2.dmg) | [Google Drive](https://drive.google.com/file/d/1oH9FHGG7eyz7arGBW69BWzYr7-d4_FZh/view?usp=sharing) | [百度网盘](https://pan.baidu.com/s/1wNEghpd_upOqNxguP4zTyg?pwd=fmx3) 提取码: fmx3 | [夸克网盘](https://pan.quark.cn/s/46cf8ec8f063)
 
 **Intel (2020年前 Mac) (v4.1.0 Beta)**
 - [GitHub 下载](https://github.com/jamesphotography/SuperPicky/releases/download/v4.1.0/SuperPicky_v4.1.0_Intel.dmg) | [Google Drive](https://drive.google.com/file/d/1igArTfwPdpNmBcaehx4aEt4aYv8Yi04Z/view?usp=sharing) | [百度网盘](https://pan.baidu.com/s/19yQiz655ebZwb2x4jM-75Q?pwd=b2tt) 提取码: b2tt | [夸克网盘](https://pan.quark.cn/s/33751818ac71)
