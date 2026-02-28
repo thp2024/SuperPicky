@@ -1699,11 +1699,12 @@ class SuperPickyMainWindow(QMainWindow):
         # 播放完成音效
         self._play_completion_sound()
 
-        # 800ms 后按设置决定行为：保留预览图才自动弹出浏览器
+        # 800ms 后按设置决定行为
         from advanced_config import get_advanced_config as _gc
         if _gc().keep_temp_files:
             QTimer.singleShot(800, self._auto_open_results)
-        # else: 不保留预览图时什么都不弹，主窗口保持可见
+        else:
+            QTimer.singleShot(800, self._open_finder_results)
 
     @Slot(str)
     def _on_error(self, error_msg):
