@@ -86,8 +86,8 @@ class AdvancedConfig:
         "delete_confirm": True,
 
         # 主界面复选框状态
-        "flight_check": True,    # 飞鸟检测默认开启
-        "burst_check": True,     # 连拍检测默认开启
+        "flight_check": False,   # 飞鸟检测默认关闭（开启后速度较慢，用户可手动开启）
+        "burst_check": False,    # 连拍检测默认关闭（开启后速度较慢，用户可手动开启）
         "exposure_check": False, # 曝光检测默认关闭
     }
 
@@ -367,11 +367,11 @@ class AdvancedConfig:
     # 主界面复选框状态 getter/setter
     @property
     def flight_check(self):
-        return self.config.get("flight_check", True)
+        return self.config.get("flight_check", False)
 
     @property
     def burst_check(self):
-        return self.config.get("burst_check", True)
+        return self.config.get("burst_check", False)
 
     @property
     def exposure_check(self):

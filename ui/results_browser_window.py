@@ -74,16 +74,24 @@ def _resolve_app_path(ap: str) -> str:
     return os.path.splitext(os.path.basename(ap))[0]
 
 
-def _best_reveal_target(filepath: str) -> str:
+def _best_reveal_target(*filepaths: str) -> str:
     """返回"在 Finder 中显示"时最合适的目标路径：
-    - 文件存在 → 直接用它（open -R 精确定位）
-    - 文件不存在 → 回退到父目录（至少打开对应文件夹）
+    - 按顺序尝试多个候选路径，第一个实际存在的文件 → open -R 精确定位
+    - 所有文件均不存在 → 回退到第一个非空路径的父目录（至少打开文件夹）
     """
-    if os.path.exists(filepath):
-        return filepath
-    parent = os.path.dirname(filepath)
-    if parent and os.path.isdir(parent):
-        return parent
+    first_valid = ""
+    for filepath in filepaths:
+        if not filepath:
+            continue
+        if not first_valid:
+            first_valid = filepath
+        if os.path.isfile(filepath):
+            return filepath
+    # 所有路径均不存在，回退到父目录
+    if first_valid:
+        parent = os.path.dirname(first_valid)
+        if parent and os.path.isdir(parent):
+            return parent
     return ""
 
 
@@ -114,9 +122,13 @@ def _show_context_menu_impl(parent_widget, photo: dict, pos, directory: str):
     """)
 
     # 在 Finder/Explorer 中显示
+    current = photo.get("current_path") or ""
+    original = photo.get("original_path") or ""
+
     def _reveal():
-        if sys.platform == "darwin" and filepath:
-            target = _best_reveal_target(filepath)
+        if sys.platform == "darwin":
+            # 按优先级依次尝试：current_path → original_path → filepath（兜底）
+            target = _best_reveal_target(current, original, filepath)
             if not target:
                 return
             # 文件存在 → open -R 精确定位；目录 → open 直接打开
@@ -125,7 +137,12 @@ def _show_context_menu_impl(parent_widget, photo: dict, pos, directory: str):
             else:
                 QProcess.startDetached("open", [target])
         elif sys.platform == "win32" and filepath:
-            QProcess.startDetached("explorer", ["/select,", filepath.replace("/", "\\")])
+            # Windows：优先用实际存在的路径
+            win_target = _best_reveal_target(current, original, filepath)
+            if os.path.isfile(win_target):
+                QProcess.startDetached("explorer", ["/select,", win_target.replace("/", "\\")])
+            elif win_target:
+                QProcess.startDetached("explorer", [win_target.replace("/", "\\")])
 
     _i18n = get_i18n()
     finder_action = QAction(_i18n.t('browser.ctx_show_in_finder'), parent_widget)

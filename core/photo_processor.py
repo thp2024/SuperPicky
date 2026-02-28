@@ -1523,13 +1523,26 @@ class PhotoProcessor:
                         w_orig_box = int(w * scale_x)
                         h_orig_box = int(h * scale_y)
                         
+                        # V4.3: 与 BirdID 保持一致，加 15% padding
+                        # 防止鸟头在 bbox 边缘时被裁切，导致关键点模型看不到眼睛
+                        pad = int(max(w_orig_box, h_orig_box) * 0.15)
+                        x_orig_pad = max(0, x_orig - pad)
+                        y_orig_pad = max(0, y_orig - pad)
+                        x2_pad = min(w_orig, x_orig + w_orig_box + pad)
+                        y2_pad = min(h_orig, y_orig + h_orig_box + pad)
+                        # 更新裁切区域（含 padding）
+                        x_orig = x_orig_pad
+                        y_orig = y_orig_pad
+                        w_orig_box = x2_pad - x_orig_pad
+                        h_orig_box = y2_pad - y_orig_pad
+                        
                         # 确保边界有效
                         x_orig = max(0, min(x_orig, w_orig - 1))
                         y_orig = max(0, min(y_orig, h_orig - 1))
                         w_orig_box = min(w_orig_box, w_orig - x_orig)
                         h_orig_box = min(h_orig_box, h_orig - y_orig)
                         
-                        # 裁剪鸟的区域（保存BGR版本供NIMA使用）
+                        # 裁剪鸟的区域（保存BGR版本供关键点/飞版/曝光使用）
                         bird_crop_bgr = orig_img[y_orig:y_orig+h_orig_box, x_orig:x_orig+w_orig_box]
                         
                         # 同样裁剪 mask (如果存在)

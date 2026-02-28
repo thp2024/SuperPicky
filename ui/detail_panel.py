@@ -299,7 +299,6 @@ class DetailPanel(QWidget):
             return l
 
         self._val_focus = _make_value_label()
-        self._val_exposure = _make_value_label()
         self._val_sharpness = _make_value_label()
         self._val_aesthetic = _make_value_label()
         self._val_flying = _make_value_label()
@@ -324,7 +323,6 @@ class DetailPanel(QWidget):
 
         rows = [
             ("browser.meta_focus",      self._val_focus),
-            ("browser.meta_exposure",   self._val_exposure),
             ("browser.meta_sharpness",  self._val_sharpness),
             ("browser.meta_aesthetic",  self._val_aesthetic),
             ("browser.meta_flying",     self._val_flying),
@@ -417,7 +415,7 @@ class DetailPanel(QWidget):
         self._copy_exif_btn.setEnabled(False)
         self._img_label.set_pixmap(QPixmap())
         for val in (
-            self._val_focus, self._val_exposure, self._val_sharpness,
+            self._val_focus, self._val_sharpness,
             self._val_aesthetic, self._val_flying, self._val_species,
             self._val_caption,
             self._val_camera, self._val_lens, self._val_shutter,
@@ -667,11 +665,6 @@ class DetailPanel(QWidget):
         self._val_focus.setText(focus)
         color = _FOCUS_COLORS.get(focus, COLORS['text_primary'])
         self._val_focus.setStyleSheet(f"color: {color}; font-size: 12px; background: transparent;")
-
-        # 曝光
-        exp = p.get("exposure_status", "")
-        _exp_key = {"GOOD": "browser.exposure_good", "OVEREXPOSED": "browser.exposure_over", "UNDEREXPOSED": "browser.exposure_under"}
-        self._val_exposure.setText(self.i18n.t(_exp_key[exp]) if exp in _exp_key else (exp or _unknown))
 
         # 锐度（颜色跟随对焦状态）
         sharp = p.get("adj_sharpness")

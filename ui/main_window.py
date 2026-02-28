@@ -1007,25 +1007,10 @@ class SuperPickyMainWindow(QMainWindow):
         burst_layout.addWidget(self.burst_check)
         
         header_layout.addLayout(burst_layout)
-        
-        # V3.8: 曝光检测开关
-        exposure_layout = QHBoxLayout()
-        exposure_layout.setSpacing(10)
-        
-        exposure_label = QLabel(self.i18n.t("menu.exposure_label"))
-        exposure_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
-        exposure_layout.addWidget(exposure_label)
-        
-        self.exposure_check = QCheckBox()
-        self.exposure_check.setChecked(self.config.exposure_check)
-        exposure_layout.addWidget(self.exposure_check)
-
-        header_layout.addLayout(exposure_layout)
 
         # 持久化复选框状态
         self.flight_check.stateChanged.connect(self._save_check_states)
         self.burst_check.stateChanged.connect(self._save_check_states)
-        self.exposure_check.stateChanged.connect(self._save_check_states)
         
         # V4.2: 自动识鸟开关
         birdid_layout = QHBoxLayout()
@@ -1601,7 +1586,7 @@ class SuperPickyMainWindow(QMainWindow):
             True,  # V4.0.5: 始终保存裁切，用于 debug_crop_path 持久化
             self.norm_mode,
             self.flight_check.isChecked(),
-            self.exposure_check.isChecked(),  # V3.8: 曝光检测开关
+            False,                            # 曝光检测已移除，固定为 False
             self.burst_check.isChecked(),     # V4.0: 连拍检测开关
             self.birdid_check.isChecked(),    # V4.2: 识鸟开关
         ]
@@ -2613,7 +2598,6 @@ class SuperPickyMainWindow(QMainWindow):
         """持久化主界面复选框状态"""
         self.config.set_flight_check(self.flight_check.isChecked())
         self.config.set_burst_check(self.burst_check.isChecked())
-        self.config.set_exposure_check(self.exposure_check.isChecked())
         self.config.save()
 
     def _check_custom_mode(self):

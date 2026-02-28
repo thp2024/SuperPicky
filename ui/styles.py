@@ -31,7 +31,7 @@ COLORS = {
 
     # 焦点状态语义色（全系统统一）
     'focus_best':   '#00cc44',   # 精焦 — 绿（相机 AF 确认色）
-    'focus_good':   '#e8b420',   # 合焦 — 琥珀（可用，非最佳）
+    'focus_good':   '#a8e066',   # 合焦 — 黄绿（淡于精焦深绿，区分明显）
     'focus_bad':    '#e0e0e0',   # 失焦 — 近白灰
     'focus_worst':  '#a1a1a1',   # 脱焦 — 灰
 
