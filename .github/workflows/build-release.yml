@@ -1,0 +1,70 @@
+name: Build and Release SuperPicky
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for the release'
+        required: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Create and activate virtual environment
+      run: |
+        python -m venv .venv
+        .venv\Scripts\activate
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements_base.txt
+        pip install pyinstaller
+
+    - name: Build CPU version
+      run: |
+        .venv\Scripts\activate
+        .\build_release_cpu.bat ${{ github.event.inputs.version || github.ref_name }}
+
+    - name: Create installer with Inno Setup
+      uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+      with:
+        path: dist_cpu/SuperPicky/SuperPicky.iss
+        options: /O+ /dAppVersion=${{ github.event.inputs.version || github.ref_name }}
+
+    - name: Prepare release assets
+      run: |
+        $version = "${{ github.event.inputs.version || github.ref_name }}".TrimStart('v')
+        New-Item -ItemType Directory -Path release_assets -Force
+        Copy-Item -Path dist_cpu\SuperPicky_v*_Win64.zip -Destination release_assets\
+        # 查找Inno Setup生成的安装包
+        Get-ChildItem -Path . -Recurse -Filter "SuperPicky*.exe" | ForEach-Object {
+          Copy-Item -Path $_.FullName -Destination release_assets\
+        }
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.version || github.ref_name }}
+        name: SuperPicky ${{ github.event.inputs.version || github.ref_name }}
+        body: |
+          Release of SuperPicky ${{ github.event.inputs.version || github.ref_name }}
+        draft: false
+        prerelease: false
+        files: |
+          release_assets/*
