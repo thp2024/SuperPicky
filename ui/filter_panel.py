@@ -20,7 +20,7 @@ from ui.styles import COLORS, FONTS
 # 评分按钮配置 (mode_key, label, ratings_list)
 # ratings_list = None → 不过滤评分
 _RATING_OPTIONS = [
-    ("3",  "★★★", [3]),
+    ("3",  "★★★", [3, 4, 5]),
     ("2",  "★★",  [2]),
     ("1",  "★",   [1]),
     ("0",  "0",   [0]),
