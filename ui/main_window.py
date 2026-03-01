@@ -576,12 +576,7 @@ class SuperPickyMainWindow(QMainWindow):
         self.birdid_dock_action.triggered.connect(self._toggle_birdid_dock)
         birdid_menu.addAction(self.birdid_dock_action)
         
-        birdid_menu.addSeparator()
-        
-        # V4.0: 后台运行（最小化到托盘，保持识鸟服务）
-        minimize_tray_action = QAction(self.i18n.t("menu.background_mode"), self)
-        minimize_tray_action.triggered.connect(self._minimize_to_tray)
-        birdid_menu.addAction(minimize_tray_action)
+
 
         # 设置菜单
         settings_menu = menubar.addMenu(self.i18n.t("menu.settings_menu"))
