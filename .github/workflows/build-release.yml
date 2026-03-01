@@ -34,27 +34,26 @@ jobs:
       run: |
         .venv\Scripts\activate
         pip install --upgrade pip
-        pip install -r requirements_base.txt
+        pip install -r requirements.txt
         pip install pyinstaller
 
     - name: Build CPU version
       run: |
         .venv\Scripts\activate
-        .\build_release_cpu.bat ${{ github.event.inputs.version || github.ref_name }}
+        .\build_release_cpu.bat
 
     - name: Create installer with Inno Setup
       uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
       with:
-        path: dist_cpu/SuperPicky/SuperPicky.iss
-        options: /O+ /dAppVersion=${{ github.event.inputs.version || github.ref_name }}
+        path: output/SuperPicky_Win64_CPU/SuperPicky.iss
 
     - name: Prepare release assets
       run: |
         $version = "${{ github.event.inputs.version || github.ref_name }}".TrimStart('v')
         New-Item -ItemType Directory -Path release_assets -Force
-        Copy-Item -Path dist_cpu\SuperPicky_v*_Win64.zip -Destination release_assets\
+        Copy-Item -Path dist_cpu\SuperPicky_Win64_CPU.zip -Destination release_assets\
         # 查找Inno Setup生成的安装包
-        Get-ChildItem -Path . -Recurse -Filter "SuperPicky*.exe" | ForEach-Object {
+        Get-ChildItem -Path . -Recurse -Filter "SuperPicky_Setup_Win64.exe" | ForEach-Object {
           Copy-Item -Path $_.FullName -Destination release_assets\
         }
 
