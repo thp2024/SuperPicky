@@ -26,15 +26,17 @@ from tools.i18n import get_i18n
 def get_birdname_db_path() -> str:
     """获取鸟类名称数据库路径"""
     if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
+        # PyInstaller 将 datas 放在 _MEIPASS (_internal/)，不是 executable 同级
+        base_dir = sys._MEIPASS
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_dir, 'ioc', 'birdname.db')
 
 
 def get_birdname_ini_path() -> str:
-    """获取 ioc 目录下的 ini 配置文件路径"""
+    """获取 ioc 目录下的 ini 配置文件路径（用户设置，存在用户可写目录）"""
     if getattr(sys, 'frozen', False):
+        # ini 是用户设置，需要写入权限，存放在 executable 同级（可写）
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
