@@ -74,7 +74,5 @@ jobs:
       with:
         tag_name: ${{ github.event.inputs.version || github.ref_name }}
         name: SuperPicky ${{ github.event.inputs.version || github.ref_name }}
-        body: |
-          Release of SuperPicky ${{ github.event.inputs.version || github.ref_name }}
         files: |
           release_assets/*
