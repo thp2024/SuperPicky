@@ -81,9 +81,6 @@ a = Analysis(
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
-        'timm',
-        'timm.models',
-        'timm.models.resnet',
         'imageio',
         'rawpy',
         'imagehash',
@@ -122,9 +119,9 @@ a = Analysis(
     runtime_hooks=['pyi_rth_cv2.py'] if os.path.exists('pyi_rth_cv2.py') else [],
     excludes=[
         'PyQt5', 'PyQt6', 'tkinter',
-        # ONNX 版本: 排除 PyTorch 和 ultralytics
+        # ONNX 版本: 排除 PyTorch 和 ultralytics 及 timm/transformers
         'torch', 'torchvision', 'torchaudio',
-        'ultralytics',
+        'ultralytics', 'timm', 'transformers',
     ],
     noarchive=False,
     optimize=0,
@@ -151,10 +148,16 @@ exe = EXE(
     icon=os.path.join(base_path, 'img', 'SuperPicky-V0.02.icns') if os.path.exists(os.path.join(base_path, 'img', 'SuperPicky-V0.02.icns')) else None,
 )
 
+# 过滤掉不必要的 .pth/.pt 文件
+filtered_datas = [
+    d for d in a.datas 
+    if not (d[0].endswith('.pth') or d[0].endswith('.pt'))
+]
+
 coll = COLLECT(
     exe,
     a.binaries,
-    a.datas,
+    filtered_datas,
     strip=False,
     upx=True,
     upx_exclude=[],
