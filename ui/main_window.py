@@ -938,6 +938,11 @@ class SuperPickyMainWindow(QMainWindow):
         无论通过 X按鈕 / Cmd+Q / 托盘退出，都会经过此处。
         Mac 和 Windows 均适用。
         """
+        if hasattr(self, '_results_browser') and self._results_browser:
+            try:
+                self._results_browser.cleanup()
+            except Exception as e:
+                print(f"⚠️  Results browser cleanup failed: {e}")
         self._stop_birdid_server()        # 停止 Flask/BirdID 进程
         
         # 清理 ExifTool 进程

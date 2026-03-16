@@ -966,6 +966,17 @@ class FullscreenViewer(QWidget):
         """
         self._photos = photos
 
+    def cleanup(self):
+        if self._loader:
+            self._loader.cancel()
+            if self._loader.isRunning():
+                self._loader.wait(1000)
+            self._loader = None
+        if self._preload_worker:
+            self._preload_worker._cancelled = True
+            if self._preload_worker.isRunning():
+                self._preload_worker.wait(1000)
+
     def show_photo(self, photo: dict):
         """
         展示一张照片。流程：

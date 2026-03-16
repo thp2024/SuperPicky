@@ -73,6 +73,88 @@ class MergedReportDB:
             sql = f"SELECT * FROM ({union_sql}) AS merged {order}"
         
         return sql, params
+
+    def get_all_photos(self) -> List[dict]:
+        """获取所有目录的照片记录"""
+        with self._lock:
+            sql, params = self._build_union_sql()
+            cursor = self._conn.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def _resolve_photo_targets(self, photo_key) -> List[str]:
+        """将照片键解析为要更新的子数据库别名列表。"""
+        if isinstance(photo_key, tuple) and len(photo_key) >= 2:
+            source_dir, filename = photo_key[0], photo_key[1]
+            if not filename:
+                return []
+            rel_dir_to_alias = {
+                os.path.relpath(self._alias_to_dir[alias], self.root_dir): alias
+                for alias in self._db_aliases
+            }
+            alias = rel_dir_to_alias.get(source_dir)
+            return [alias] if alias else []
+
+        filename = photo_key
+        if not filename:
+            return []
+
+        aliases = []
+        for alias in self._db_aliases:
+            cursor = self._conn.execute(
+                f"SELECT 1 FROM {alias}.photos WHERE filename = ? LIMIT 1",
+                (filename,),
+            )
+            if cursor.fetchone():
+                aliases.append(alias)
+        return aliases if len(aliases) == 1 else []
+
+    def update_photo(self, photo_key, data: dict) -> bool:
+        """按稳定键更新记录，兼容 filename 或 (source_dir, filename)。"""
+        if not data:
+            return False
+
+        from .report_db import COLUMN_NAMES, _now_iso, ReportDB
+
+        cleaned = ReportDB._clean_data(data)
+        cleaned["updated_at"] = _now_iso()
+        columns = [k for k in cleaned if k in COLUMN_NAMES and k not in ("filename", "id")]
+        if not columns:
+            return False
+
+        targets = self._resolve_photo_targets(photo_key)
+        if not targets:
+            return False
+
+        values = [cleaned[k] for k in columns]
+        set_clause = ", ".join(f"{c} = ?" for c in columns)
+        filename = photo_key[1] if isinstance(photo_key, tuple) else photo_key
+        updated = False
+
+        with self._lock:
+            for alias in targets:
+                sql = f"UPDATE {alias}.photos SET {set_clause} WHERE filename = ?"
+                cursor = self._conn.execute(sql, values + [filename])
+                updated = updated or cursor.rowcount > 0
+            self._safe_commit()
+        return updated
+
+    def delete_photo(self, photo_key) -> bool:
+        """按稳定键删除记录，兼容 filename 或 (source_dir, filename)。"""
+        targets = self._resolve_photo_targets(photo_key)
+        if not targets:
+            return False
+
+        filename = photo_key[1] if isinstance(photo_key, tuple) else photo_key
+        deleted = False
+        with self._lock:
+            for alias in targets:
+                cursor = self._conn.execute(
+                    f"DELETE FROM {alias}.photos WHERE filename = ?",
+                    (filename,),
+                )
+                deleted = deleted or cursor.rowcount > 0
+            self._safe_commit()
+        return deleted
     
     def update_burst_ids(self, burst_map: dict) -> int:
         """

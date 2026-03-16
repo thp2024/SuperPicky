@@ -142,11 +142,11 @@ class DetailPanel(QWidget):
     信号:
         prev_requested()              用户点击"上一张"
         next_requested()              用户点击"下一张"
-        rating_change_requested(str, int)  用户点击 ▼/▲ 修改评分 (filename, new_rating)
+        rating_change_requested(object, int)  用户点击 ▼/▲ 修改评分 (photo, new_rating)
     """
     prev_requested = Signal()
     next_requested = Signal()
-    rating_change_requested = Signal(str, int)
+    rating_change_requested = Signal(object, int)
 
     def __init__(self, i18n, parent=None):
         super().__init__(parent)
@@ -452,8 +452,7 @@ class DetailPanel(QWidget):
             return
         self._current_photo["rating"] = new_val
         self._refresh_metadata()
-        fn = self._current_photo.get("filename", "")
-        self.rating_change_requested.emit(fn, new_val)
+        self.rating_change_requested.emit(dict(self._current_photo), new_val)
 
     def _on_rating_inc(self):
         """▲ 按钮：评分 +1（最高 5）。"""
@@ -465,8 +464,7 @@ class DetailPanel(QWidget):
             return
         self._current_photo["rating"] = new_val
         self._refresh_metadata()
-        fn = self._current_photo.get("filename", "")
-        self.rating_change_requested.emit(fn, new_val)
+        self.rating_change_requested.emit(dict(self._current_photo), new_val)
 
     def _on_copy_exif(self):
         """复制当前照片的 EXIF 信息到剪贴板。"""
@@ -595,6 +593,13 @@ class DetailPanel(QWidget):
             self._loader.start()
         else:
             self._img_label.set_pixmap(QPixmap())
+
+    def cleanup(self):
+        if self._loader:
+            self._loader.cancel()
+            if self._loader.isRunning():
+                self._loader.wait(1000)
+            self._loader = None
 
     def _resolve_image_path(self) -> Optional[str]:
         """根据当前视图模式解析目标图片路径。"""

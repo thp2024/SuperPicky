@@ -43,6 +43,14 @@ _RATING_COLORS = {
 _DEFAULT_THUMB_SIZE = 160
 
 
+def _photo_key(photo: dict):
+    source_dir = photo.get("source_dir")
+    filename = photo.get("filename", "")
+    if source_dir:
+        return (source_dir, filename)
+    return filename
+
+
 # ============================================================
 #  LRU 缩略图缓存
 # ============================================================
@@ -72,13 +80,113 @@ class _LRUCache:
 _thumb_cache = _LRUCache(500)
 
 
+def _draw_static_overlays(image: QImage, photo: dict):
+    """在 QImage 上预先绘制静态叠加层（评分、对焦状态等）。"""
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    rating = photo.get("rating", 0)
+    focus = photo.get("focus_status")
+
+    # 右上角：评分星标
+    if rating and rating > 0:
+        if rating >= 4:
+            stars = f"{rating}★"
+        else:
+            stars = "★" * rating
+        color = _RATING_COLORS.get(rating, QColor(COLORS['text_muted']))
+        bg = QColor(0, 0, 0, 160)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bg)
+        rect_w = 40 if rating >= 4 else 36
+        rect_h = 16
+        x = image.width() - rect_w - 4
+        painter.drawRoundedRect(x, 4, rect_w, rect_h, 4, 4)
+        painter.setPen(color)
+        font = QFont()
+        font.setPixelSize(10)
+        painter.setFont(font)
+        painter.drawText(x, 4, rect_w, rect_h, Qt.AlignCenter, stars)
+
+    # 右下角：对焦状态圆点
+    if focus and focus in _FOCUS_DOT_COLORS:
+        dot_color = _FOCUS_DOT_COLORS[focus]
+        cx = image.width() - 10
+        cy = image.height() - 10
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 1.5))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(cx - 6, cy - 6, 12, 12)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(dot_color)
+        painter.drawEllipse(cx - 4, cy - 4, 8, 8)
+
+    # 左下角：burst 编号
+    burst_total = photo.get("burst_total")
+    burst_pos = photo.get("burst_position")
+    if burst_total is not None and burst_pos is not None:
+        burst_text = f"B{burst_total}/{burst_pos}"
+        bg = QColor(0, 0, 0, 160)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bg)
+        rect_w, rect_h = 38, 16
+        painter.drawRoundedRect(4, image.height() - rect_h - 4, rect_w, rect_h, 4, 4)
+        painter.setPen(QColor(220, 220, 220))
+        font = QFont()
+        font.setPixelSize(9)
+        painter.setFont(font)
+        painter.drawText(4, image.height() - rect_h - 4, rect_w, rect_h, Qt.AlignCenter, burst_text)
+
+    painter.end()
+
+
+def _load_thumbnail_image(photo: dict, thumb_size: int) -> Optional[QImage]:
+    """按优先级查找可用图片文件并返回裁切后的缩略图 QImage。"""
+    candidates = []
+
+    ydp = photo.get("yolo_debug_path")
+    if ydp and os.path.exists(ydp):
+        candidates.append(ydp)
+
+    tjp = photo.get("temp_jpeg_path")
+    if tjp and os.path.exists(tjp):
+        candidates.append(tjp)
+
+    dcp = photo.get("debug_crop_path")
+    if dcp and os.path.exists(dcp):
+        candidates.append(dcp)
+
+    op = photo.get("original_path") or photo.get("current_path")
+    if op and os.path.exists(op):
+        ext = os.path.splitext(op)[1].lower()
+        if ext in ('.jpg', '.jpeg'):
+            candidates.append(op)
+
+    for path in candidates:
+        image = QImage(path)
+        if image.isNull():
+            continue
+        size = QSize(thumb_size, thumb_size)
+        image = image.scaled(
+            size,
+            Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation
+        )
+        if image.width() > thumb_size or image.height() > thumb_size:
+            x = (image.width() - thumb_size) // 2
+            y = (image.height() - thumb_size) // 2
+            image = image.copy(x, y, thumb_size, thumb_size)
+        return image
+
+    return None
+
+
 # ============================================================
 #  ThumbnailLoader — 后台异步加载
 # ============================================================
 
 class _LoaderSignals(QObject):
-    thumbnail_ready = Signal(str, object)   # filename, QImage
-    load_error = Signal(str)
+    thumbnail_ready = Signal(object, object)   # photo_key, QImage
+    load_error = Signal(object)
 
 class _ThumbnailWorker(QThread):
     def __init__(self, manager):
@@ -92,12 +200,12 @@ class _ThumbnailWorker(QThread):
                 break # cancelled or finished
                 
             photo, thumb_size = task
-            filename = photo.get("filename", "")
+            photo_key = _photo_key(photo)
             
             # 先查缓存
-            cached = _thumb_cache.get(filename)
+            cached = _thumb_cache.get(photo_key)
             if cached is not None:
-                self.manager.signals.thumbnail_ready.emit(filename, cached)
+                self.manager.signals.thumbnail_ready.emit(photo_key, cached)
                 continue
 
             pixmap = self.manager._load_pixmap(photo)
@@ -113,11 +221,11 @@ class _ThumbnailWorker(QThread):
                     y = (pixmap.height() - thumb_size) // 2
                     pixmap = pixmap.copy(x, y, thumb_size, thumb_size)
 
-                self.manager._draw_static_overlays(pixmap, photo)
-                _thumb_cache.put(filename, pixmap)
-                self.manager.signals.thumbnail_ready.emit(filename, pixmap)
+                _draw_static_overlays(pixmap, photo)
+                _thumb_cache.put(photo_key, pixmap)
+                self.manager.signals.thumbnail_ready.emit(photo_key, pixmap)
             else:
-                self.manager.signals.thumbnail_ready.emit(filename, QImage())
+                self.manager.signals.thumbnail_ready.emit(photo_key, QImage())
 
 class ThumbnailLoader(QObject):
     """
@@ -130,9 +238,9 @@ class ThumbnailLoader(QObject):
         
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        self._tasks_map = {p.get("filename", ""): p for p in tasks}
+        self._tasks_map = {_photo_key(p): p for p in tasks}
         self._pending_set = set(self._tasks_map.keys())
-        self._visible_filenames = []
+        self._visible_keys = []
         
         self._cancelled = False
         self._workers = []
@@ -146,10 +254,10 @@ class ThumbnailLoader(QObject):
         for w in self._workers:
             w.start()
 
-    def update_visible(self, filenames: list):
+    def update_visible(self, photo_keys: list):
         with self._cond:
-            self._visible_filenames = [f for f in filenames if f in self._pending_set]
-            if self._visible_filenames:
+            self._visible_keys = [k for k in photo_keys if k in self._pending_set]
+            if self._visible_keys:
                 self._cond.notify_all()
 
     def cancel(self):
@@ -165,6 +273,10 @@ class ThumbnailLoader(QObject):
     def isRunning(self):
         return any(w.isRunning() for w in self._workers)
 
+    def cleanup(self):
+        self.cancel()
+        self.wait(1000)
+
     def _get_next_task(self):
         with self._cond:
             while not self._cancelled and not self._pending_set:
@@ -174,109 +286,22 @@ class ThumbnailLoader(QObject):
                 return None
                 
             # 优先可见区域
-            for f in self._visible_filenames:
-                if f in self._pending_set:
-                    self._pending_set.remove(f)
-                    self._visible_filenames.remove(f)
-                    return self._tasks_map[f], self._thumb_size
+            for key in self._visible_keys:
+                if key in self._pending_set:
+                    self._pending_set.remove(key)
+                    self._visible_keys.remove(key)
+                    return self._tasks_map[key], self._thumb_size
             
             # 若无可见区域，弹出任意一个待处理任务
             if self._pending_set:
-                f = self._pending_set.pop()
-                return self._tasks_map[f], self._thumb_size
+                key = self._pending_set.pop()
+                return self._tasks_map[key], self._thumb_size
                 
             return None
 
-    def _draw_static_overlays(self, image: QImage, photo: dict):
-        """在 QImage 上预先绘制静态叠加层（评分、对焦状态等），减轻 UI 线程负担。"""
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        rating = photo.get("rating", 0)
-        focus = photo.get("focus_status")
-
-        # 右上角：评分星标
-        if rating and rating > 0:
-            if rating >= 4:
-                stars = f"{rating}★"
-            else:
-                stars = "★" * rating
-            color = _RATING_COLORS.get(rating, QColor(COLORS['text_muted']))
-            bg = QColor(0, 0, 0, 160)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(bg)
-            rect_w = 40 if rating >= 4 else 36
-            rect_h = 16
-            x = image.width() - rect_w - 4
-            painter.drawRoundedRect(x, 4, rect_w, rect_h, 4, 4)
-            painter.setPen(color)
-            font = QFont()
-            font.setPixelSize(10)
-            painter.setFont(font)
-            painter.drawText(x, 4, rect_w, rect_h, Qt.AlignCenter, stars)
-
-        # 右下角：对焦状态圆点
-        if focus and focus in _FOCUS_DOT_COLORS:
-            dot_color = _FOCUS_DOT_COLORS[focus]
-            cx = image.width() - 10
-            cy = image.height() - 10
-            painter.setPen(QPen(QColor(255, 255, 255, 180), 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(cx - 6, cy - 6, 12, 12)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(dot_color)
-            painter.drawEllipse(cx - 4, cy - 4, 8, 8)
-
-        # 左下角：burst 编号
-        burst_total = photo.get("burst_total")
-        burst_pos = photo.get("burst_position")
-        if burst_total is not None and burst_pos is not None:
-            burst_text = f"B{burst_total}/{burst_pos}"
-            bg = QColor(0, 0, 0, 160)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(bg)
-            rect_w, rect_h = 38, 16
-            painter.drawRoundedRect(4, image.height() - rect_h - 4, rect_w, rect_h, 4, 4)
-            painter.setPen(QColor(220, 220, 220))
-            font = QFont()
-            font.setPixelSize(9)
-            painter.setFont(font)
-            painter.drawText(4, image.height() - rect_h - 4, rect_w, rect_h, Qt.AlignCenter, burst_text)
-
-        painter.end()
-
     def _load_pixmap(self, photo: dict) -> Optional[QImage]:
         """按优先级查找可用图片文件并加载到 QImage。"""
-        candidates = []
-
-        # 1. yolo_debug_path（全图 + 检测框，构图感更好）
-        ydp = photo.get("yolo_debug_path")
-        if ydp and os.path.exists(ydp):
-            candidates.append(ydp)
-
-        # 2. temp_jpeg_path（全图 JPEG 预览）
-        tjp = photo.get("temp_jpeg_path")
-        if tjp and os.path.exists(tjp):
-            candidates.append(tjp)
-
-        # 3. debug_crop_path（裁切图，备用）
-        dcp = photo.get("debug_crop_path")
-        if dcp and os.path.exists(dcp):
-            candidates.append(dcp)
-
-        # 4. original_path（直接找原始 JPG）
-        op = photo.get("original_path") or photo.get("current_path")
-        if op and os.path.exists(op):
-            ext = os.path.splitext(op)[1].lower()
-            if ext in ('.jpg', '.jpeg'):
-                candidates.append(op)
-
-        for path in candidates:
-            img = QImage(path)
-            if not img.isNull():
-                return img
-
-        return None
+        return _load_thumbnail_image(photo, self._thumb_size)
 
 
 # ============================================================
@@ -570,14 +595,14 @@ class ThumbnailGrid(QScrollArea):
         self.i18n = i18n
         self._thumb_size = _DEFAULT_THUMB_SIZE
         self._photos: list = []
-        self._cards: dict = {}         # filename -> ThumbnailCard
-        self._selected_filename: str = ""
+        self._cards: dict = {}         # photo_key -> ThumbnailCard
+        self._selected_key = None
         self._loader: Optional[ThumbnailLoader] = None
         self._transition_overlay: Optional[QLabel] = None
         self._transition_effect: Optional[QGraphicsOpacityEffect] = None
         self._transition_anim: Optional[QPropertyAnimation] = None
         # C3 多选状态
-        self._multi_selected: set = set()       # filename 集合
+        self._multi_selected: set = set()       # photo_key 集合
         self._last_clicked_idx: int = -1        # Shift 范围选起点
         self._anchor_photo: Optional[dict] = None  # 单选锚点（对比视图左侧）
         self._pending_photos: Optional[list] = None  # 延迟构建用
@@ -656,11 +681,11 @@ class ThumbnailGrid(QScrollArea):
         start_idx = start_row * col_count
         end_idx = min(len(self._photos), (end_row + 1) * col_count)
         
-        visible_filenames = []
+        visible_keys = []
         for i in range(start_idx, end_idx):
-            visible_filenames.append(self._photos[i].get("filename", ""))
+            visible_keys.append(_photo_key(self._photos[i]))
             
-        self._loader.update_visible(visible_filenames)
+        self._loader.update_visible(visible_keys)
 
     # ------------------------------------------------------------------
     #  公共接口
@@ -695,6 +720,14 @@ class ThumbnailGrid(QScrollArea):
         # 移除加载提示，改为渐进式渲染
         self._pending_photos = photos
         self._build_timer.start()
+
+    def cleanup(self):
+        self._build_timer.stop()
+        self._batch_timer.stop()
+        self._clear_transition_overlay()
+        if self._loader:
+            self._loader.cleanup()
+            self._loader = None
 
     def _deferred_build(self):
         """延迟构建网格开始（布局稳定后执行）。"""
@@ -780,14 +813,14 @@ class ThumbnailGrid(QScrollArea):
             card.double_clicked.connect(lambda p: self.photo_double_clicked.emit(p))
             card.context_menu_requested.connect(self._on_context_menu_requested)
             card.badge_clicked.connect(self._on_badge_clicked)
-            filename = photo.get("filename", "")
-            self._cards[filename] = card
+            photo_key = _photo_key(photo)
+            self._cards[photo_key] = card
             self._grid.addWidget(card, row, col)
             
             # 强制设置行最小高度
             self._grid.setRowMinimumHeight(row, self._thumb_size + 32)
 
-            cached = _thumb_cache.get(filename)
+            cached = _thumb_cache.get(photo_key)
             if cached:
                 card.set_pixmap(cached)
 
@@ -817,10 +850,10 @@ class ThumbnailGrid(QScrollArea):
 
     def get_multi_selected_photos(self) -> list:
         """返回对比视图所需的照片对（最多2张）。"""
-        in_multi = [p for p in self._photos if p.get("filename", "") in self._multi_selected]
+        in_multi = [p for p in self._photos if _photo_key(p) in self._multi_selected]
         if len(in_multi) == 1 and self._anchor_photo:
-            anchor_fn = self._anchor_photo.get("filename", "")
-            if anchor_fn not in self._multi_selected:
+            anchor_key = _photo_key(self._anchor_photo)
+            if anchor_key not in self._multi_selected:
                 return [self._anchor_photo] + in_multi
         return in_multi
 
@@ -830,33 +863,42 @@ class ThumbnailGrid(QScrollArea):
         self._anchor_photo = None
         self._emit_multi_selection()
 
-    def refresh_photo(self, filename: str, new_rating: int):
+    def refresh_photo(self, photo_or_key, new_rating: int):
         """更新指定照片的评分角标（不重新加载缩略图）。"""
-        card = self._cards.get(filename)
+        photo_key = _photo_key(photo_or_key) if isinstance(photo_or_key, dict) else photo_or_key
+        card = self._cards.get(photo_key)
         if card:
             card.photo["rating"] = new_rating
-            card._draw_overlays()
+            image = _load_thumbnail_image(card.photo, self._thumb_size)
+            if image and not image.isNull():
+                _draw_static_overlays(image, card.photo)
+                _thumb_cache.put(photo_key, image)
+                card.set_pixmap(image)
+            else:
+                card._draw_overlays()
 
-    def remove_photo(self, filename: str):
+    def remove_photo(self, photo_or_key):
         """从网格中移除指定缩略图卡片（不重新加载全部数据）。"""
-        card = self._cards.pop(filename, None)
+        photo_key = _photo_key(photo_or_key) if isinstance(photo_or_key, dict) else photo_or_key
+        card = self._cards.pop(photo_key, None)
         if card:
             self._grid.removeWidget(card)
             card.deleteLater()
-        self._photos = [p for p in self._photos if p.get("filename", "") != filename]
-        self._multi_selected.discard(filename)
-        if self._selected_filename == filename:
-            self._selected_filename = ""
+        self._photos = [p for p in self._photos if _photo_key(p) != photo_key]
+        self._multi_selected.discard(photo_key)
+        if self._selected_key == photo_key:
+            self._selected_key = None
 
-    def select_photo(self, filename: str):
-        """高亮选中指定文件名的卡片。"""
-        if self._selected_filename and self._selected_filename in self._cards:
-            self._cards[self._selected_filename].set_selected(False)
-        self._selected_filename = filename
-        if filename in self._cards:
-            self._cards[filename].set_selected(True)
+    def select_photo(self, photo_or_key):
+        """高亮选中指定照片卡片。"""
+        photo_key = _photo_key(photo_or_key) if isinstance(photo_or_key, dict) else photo_or_key
+        if self._selected_key and self._selected_key in self._cards:
+            self._cards[self._selected_key].set_selected(False)
+        self._selected_key = photo_key
+        if photo_key in self._cards:
+            self._cards[photo_key].set_selected(True)
             # 滚动到可见区域
-            card = self._cards[filename]
+            card = self._cards[photo_key]
             self.ensureWidgetVisible(card)
 
     def select_next(self) -> Optional[dict]:
@@ -874,22 +916,22 @@ class ThumbnailGrid(QScrollArea):
     def _select_adjacent(self, delta: int) -> Optional[dict]:
         if not self._photos:
             return None
-        filenames = [p.get("filename", "") for p in self._photos]
+        photo_keys = [_photo_key(p) for p in self._photos]
         try:
-            idx = filenames.index(self._selected_filename)
+            idx = photo_keys.index(self._selected_key)
         except ValueError:
             idx = -1
         new_idx = idx + delta
         if 0 <= new_idx < len(self._photos):
             photo = self._photos[new_idx]
-            self.select_photo(photo.get("filename", ""))
+            self.select_photo(photo)
             self.photo_selected.emit(photo)
             return photo
         return None
 
-    @Slot(str, object)
-    def _on_thumbnail_ready(self, filename: str, image: QImage):
-        card = self._cards.get(filename)
+    @Slot(object, object)
+    def _on_thumbnail_ready(self, photo_key, image: QImage):
+        card = self._cards.get(photo_key)
         if card:
             card.set_pixmap(image)
 
@@ -902,23 +944,23 @@ class ThumbnailGrid(QScrollArea):
         """处理卡片点击，支持 Ctrl/Shift 多选（C3）。"""
         from PySide6.QtWidgets import QApplication
         modifiers = QApplication.keyboardModifiers()
-        filename = photo.get("filename", "")
-        filenames = [p.get("filename", "") for p in self._photos]
+        photo_key = _photo_key(photo)
+        photo_keys = [_photo_key(p) for p in self._photos]
         try:
-            clicked_idx = filenames.index(filename)
+            clicked_idx = photo_keys.index(photo_key)
         except ValueError:
             clicked_idx = -1
 
         if modifiers & Qt.ControlModifier:
             # Ctrl+点击：切换该照片的多选状态
-            if filename in self._multi_selected:
-                self._multi_selected.discard(filename)
-                card = self._cards.get(filename)
+            if photo_key in self._multi_selected:
+                self._multi_selected.discard(photo_key)
+                card = self._cards.get(photo_key)
                 if card:
                     card.set_multi_selected(False)
             else:
-                self._multi_selected.add(filename)
-                card = self._cards.get(filename)
+                self._multi_selected.add(photo_key)
+                card = self._cards.get(photo_key)
                 if card:
                     card.set_multi_selected(True)
             self._last_clicked_idx = clicked_idx
@@ -928,9 +970,9 @@ class ThumbnailGrid(QScrollArea):
             lo = min(self._last_clicked_idx, clicked_idx)
             hi = max(self._last_clicked_idx, clicked_idx)
             for i in range(lo, hi + 1):
-                fn = filenames[i]
-                self._multi_selected.add(fn)
-                card = self._cards.get(fn)
+                key = photo_keys[i]
+                self._multi_selected.add(key)
+                card = self._cards.get(key)
                 if card:
                     card.set_multi_selected(True)
             self._emit_multi_selection()
@@ -939,14 +981,14 @@ class ThumbnailGrid(QScrollArea):
             self._clear_multi_selection()
             self._anchor_photo = photo
             self._last_clicked_idx = clicked_idx
-            self.select_photo(filename)
+            self.select_photo(photo)
             self.photo_selected.emit(photo)
             self._emit_multi_selection()   # 让 compare 按钮隐藏
 
     def _clear_multi_selection(self):
         """清空所有多选状态。"""
-        for fn in list(self._multi_selected):
-            card = self._cards.get(fn)
+        for key in list(self._multi_selected):
+            card = self._cards.get(key)
             if card:
                 card.set_multi_selected(False)
         self._multi_selected.clear()

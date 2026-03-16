@@ -42,6 +42,28 @@ def _photo_identity(photo: dict) -> tuple:
     return (photo.get("source_dir") or "", photo.get("filename") or "")
 
 
+def _photo_db_key(photo: dict):
+    source_dir = photo.get("source_dir")
+    filename = photo.get("filename") or ""
+    if source_dir:
+        return (source_dir, filename)
+    return filename
+
+
+def _coerce_photo(photo_or_filename, photo_pool: list, fallback_photo: Optional[dict] = None) -> Optional[dict]:
+    if isinstance(photo_or_filename, dict):
+        return photo_or_filename
+
+    filename = photo_or_filename or ""
+    if fallback_photo and fallback_photo.get("filename") == filename:
+        return fallback_photo
+
+    matches = [p for p in photo_pool if p.get("filename") == filename]
+    if len(matches) == 1:
+        return matches[0]
+    return fallback_photo if isinstance(fallback_photo, dict) else (matches[0] if matches else None)
+
+
 def _parse_capture_time(value) -> Optional[datetime]:
     if not value:
         return None
@@ -757,7 +779,7 @@ class ResultsBrowserWindow(QMainWindow):
         best_burst_photos = {}
         for bid, photos in burst_map.items():
             best_photo = max(photos, key=lambda x: (x.get("rating", 0), x.get("composite_score", 0.0)))
-            best_burst_photos[bid] = best_photo.get("filename")
+            best_burst_photos[bid] = _photo_identity(best_photo)
 
         grouped_photos = []
         processed_bursts = set()
@@ -789,8 +811,8 @@ class ResultsBrowserWindow(QMainWindow):
                         grouped_photos.append(expanded_photo)
                 else:
                     # Collapsed: add only the representative photo
-                    best_fn = best_burst_photos[bid]
-                    best_p = next(x for x in burst_photos if x.get("filename") == best_fn)
+                    best_identity = best_burst_photos[bid]
+                    best_p = next(x for x in burst_photos if _photo_identity(x) == best_identity)
                     
                     group_photo = dict(best_p)
                     group_photo["is_burst_group"] = True
@@ -806,19 +828,18 @@ class ResultsBrowserWindow(QMainWindow):
         self._filtered_photos = grouped_photos
         
         # Save selection state to try and restore it
-        current_selection = self._thumb_grid._selected_filename
+        current_selection = self._thumb_grid._selected_key
         
         self._thumb_grid.load_photos(self._filtered_photos, keep_scroll=True)
         self._fullscreen.set_photo_list(self._filtered_photos)
 
         if self._filtered_photos:
-            target_fn = current_selection if current_selection else self._filtered_photos[0].get("filename", "")
-            # Verify target still exists
-            if not any(p.get("filename") == target_fn for p in self._filtered_photos):
-                target_fn = self._filtered_photos[0].get("filename", "")
-                
-            self._thumb_grid.select_photo(target_fn)
-            selected_photo = next(p for p in self._filtered_photos if p.get("filename") == target_fn)
+            target_identity = current_selection if current_selection else _photo_identity(self._filtered_photos[0])
+            if not any(_photo_identity(p) == target_identity for p in self._filtered_photos):
+                target_identity = _photo_identity(self._filtered_photos[0])
+
+            selected_photo = next(p for p in self._filtered_photos if _photo_identity(p) == target_identity)
+            self._thumb_grid.select_photo(selected_photo)
             self._detail_panel.show_photo(selected_photo)
         else:
             self._detail_panel.clear()
@@ -883,18 +904,27 @@ class ResultsBrowserWindow(QMainWindow):
             self._fullscreen.show_photo(photo)
             self._detail_panel.show_photo(photo)
 
-    @Slot(str, int)
-    def _on_rating_changed(self, filename: str, new_rating: int):
+    @Slot(object, int)
+    def _on_rating_changed(self, photo_or_filename, new_rating: int):
         """详情面板评分修改：写入 DB + 刷新缩略图角标 + 异步写 EXIF。"""
+        current_photo = _coerce_photo(
+            photo_or_filename,
+            self._filtered_photos,
+            getattr(self._detail_panel, "_current_photo", None),
+        ) or {}
+        filename = current_photo.get("filename") or (photo_or_filename if isinstance(photo_or_filename, str) else "")
+        db_key = _photo_db_key(current_photo) if current_photo else filename
         if self._db:
-            self._db.update_photo(filename, {"rating": new_rating})
+            self._db.update_photo(db_key, {"rating": new_rating})
         for p in self._filtered_photos:
-            if p.get("filename") == filename:
+            if _photo_identity(p) == _photo_identity(current_photo) or (
+                not current_photo and p.get("filename") == filename
+            ):
                 p["rating"] = new_rating
                 break
-        self._thumb_grid.refresh_photo(filename, new_rating)
+        self._thumb_grid.refresh_photo(current_photo or filename, new_rating)
         # 异步写 EXIF（遵守 metadata_write_mode 设置，mode=none 时内部自动跳过）
-        file_path = self._get_photo_file_path(filename)
+        file_path = self._get_photo_file_path(current_photo or filename)
         if file_path:
             import threading
             from tools.exiftool_manager import get_exiftool_manager
@@ -904,12 +934,12 @@ class ResultsBrowserWindow(QMainWindow):
                 daemon=True,
             ).start()
 
-    def _get_photo_file_path(self, filename: str) -> "str | None":
-        """根据 filename 查找照片的绝对文件路径（优先 current_path，其次 original_path）。"""
-        for p in self._filtered_photos:
-            if p.get("filename") == filename:
-                path = p.get("current_path") or p.get("original_path") or ""
-                return path if path and os.path.exists(path) else None
+    def _get_photo_file_path(self, photo_or_filename) -> "str | None":
+        """根据 photo 或 filename 查找照片绝对路径。"""
+        photo = _coerce_photo(photo_or_filename, self._filtered_photos)
+        if photo:
+            path = photo.get("current_path") or photo.get("original_path") or ""
+            return path if path and os.path.exists(path) else None
         return None
 
     @Slot(list)
@@ -972,14 +1002,15 @@ class ResultsBrowserWindow(QMainWindow):
 
         # 3. DB 删除
         if self._db:
-            self._db.delete_photo(filename)
+            self._db.delete_photo(_photo_db_key(photo))
 
         # 4. 从内存列表移除
-        self._filtered_photos = [p for p in self._filtered_photos if p.get("filename") != filename]
-        self._all_photos = [p for p in self._all_photos if p.get("filename") != filename]
+        target_identity = _photo_identity(photo)
+        self._filtered_photos = [p for p in self._filtered_photos if _photo_identity(p) != target_identity]
+        self._all_photos = [p for p in self._all_photos if _photo_identity(p) != target_identity]
 
         # 5. 缩略图同步
-        self._thumb_grid.remove_photo(filename)
+        self._thumb_grid.remove_photo(photo)
         self._fullscreen.set_photo_list(self._filtered_photos)
 
         # 6. 跳转逻辑
@@ -1088,14 +1119,34 @@ class ResultsBrowserWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event):
+        self.cleanup()
+        self.closed.emit()
+        super().closeEvent(event)
+
+    def cleanup(self):
+        """释放线程和 DB 连接。"""
+        try:
+            self._thumb_grid.cleanup()
+        except Exception:
+            pass
+        try:
+            self._fullscreen.cleanup()
+        except Exception:
+            pass
+        try:
+            self._comparison.cleanup()
+        except Exception:
+            pass
+        try:
+            self._detail_panel.cleanup()
+        except Exception:
+            pass
         if self._db:
             try:
                 self._db.close()
             except Exception:
                 pass
             self._db = None
-        self.closed.emit()
-        super().closeEvent(event)
 
 
 # ============================================================
@@ -1435,6 +1486,22 @@ class ResultsBrowserWidget(QWidget):
 
     def cleanup(self):
         """释放 DB 连接（切换回处理页前调用）。"""
+        try:
+            self._thumb_grid.cleanup()
+        except Exception:
+            pass
+        try:
+            self._fullscreen.cleanup()
+        except Exception:
+            pass
+        try:
+            self._comparison.cleanup()
+        except Exception:
+            pass
+        try:
+            self._detail_panel.cleanup()
+        except Exception:
+            pass
         if self._db:
             try:
                 self._db.close()
@@ -1490,7 +1557,7 @@ class ResultsBrowserWidget(QWidget):
         best_burst_photos = {}
         for burst_id, photos in burst_map.items():
             best_photo = max(photos, key=lambda x: (x.get("rating", 0), x.get("composite_score", 0.0)))
-            best_burst_photos[burst_id] = best_photo.get("filename")
+            best_burst_photos[burst_id] = _photo_identity(best_photo)
 
         grouped_photos = []
         processed_bursts = set()
@@ -1512,8 +1579,8 @@ class ResultsBrowserWidget(QWidget):
                     expanded_photo["burst_total_count"] = len(burst_photos)
                     grouped_photos.append(expanded_photo)
             else:
-                best_fn = best_burst_photos[burst_id]
-                best_photo = next(x for x in burst_photos if x.get("filename") == best_fn)
+                best_identity = best_burst_photos[burst_id]
+                best_photo = next(x for x in burst_photos if _photo_identity(x) == best_identity)
                 group_photo = dict(best_photo)
                 group_photo["is_burst_group"] = True
                 group_photo["burst_count"] = len(burst_photos)
@@ -1521,16 +1588,16 @@ class ResultsBrowserWidget(QWidget):
                 grouped_photos.append(group_photo)
 
         self._filtered_photos = grouped_photos
-        current_selection = self._thumb_grid._selected_filename
+        current_selection = self._thumb_grid._selected_key
         self._thumb_grid.load_photos(self._filtered_photos, keep_scroll=True)
         self._fullscreen.set_photo_list(self._filtered_photos)
 
         if self._filtered_photos:
-            target_fn = current_selection or self._filtered_photos[0].get("filename", "")
-            if not any(p.get("filename") == target_fn for p in self._filtered_photos):
-                target_fn = self._filtered_photos[0].get("filename", "")
-            self._thumb_grid.select_photo(target_fn)
-            selected_photo = next(p for p in self._filtered_photos if p.get("filename") == target_fn)
+            target_identity = current_selection or _photo_identity(self._filtered_photos[0])
+            if not any(_photo_identity(p) == target_identity for p in self._filtered_photos):
+                target_identity = _photo_identity(self._filtered_photos[0])
+            selected_photo = next(p for p in self._filtered_photos if _photo_identity(p) == target_identity)
+            self._thumb_grid.select_photo(selected_photo)
             self._detail_panel.show_photo(selected_photo)
         else:
             self._detail_panel.clear()
@@ -1593,19 +1660,27 @@ class ResultsBrowserWidget(QWidget):
             self._fullscreen.show_photo(photo)
             self._detail_panel.show_photo(photo)
 
-    @Slot(str, int)
-    def _on_rating_changed(self, filename: str, new_rating: int):
+    @Slot(object, int)
+    def _on_rating_changed(self, photo_or_filename, new_rating: int):
         """详情面板评分修改：写入 DB + 刷新缩略图角标 + 异步写 EXIF。"""
+        current_photo = _coerce_photo(
+            photo_or_filename,
+            self._filtered_photos,
+            getattr(self._detail_panel, "_current_photo", None),
+        ) or {}
+        filename = current_photo.get("filename") or (photo_or_filename if isinstance(photo_or_filename, str) else "")
+        db_key = _photo_db_key(current_photo) if current_photo else filename
         if self._db:
-            self._db.update_photo(filename, {"rating": new_rating})
+            self._db.update_photo(db_key, {"rating": new_rating})
         for p in self._filtered_photos:
-            if p.get("filename") == filename:
+            if _photo_identity(p) == _photo_identity(current_photo) or (
+                not current_photo and p.get("filename") == filename
+            ):
                 p["rating"] = new_rating
                 break
-        self._thumb_grid.refresh_photo(filename, new_rating)
+        self._thumb_grid.refresh_photo(current_photo or filename, new_rating)
         # 异步写 EXIF（遵守 metadata_write_mode 设置，mode=none 时内部自动跳过）
-        file_path = self._get_photo_file_path(filename)
-        print(f"[EXIF DEBUG][Widget] filename={filename}, file_path={file_path}, rating={new_rating}")
+        file_path = self._get_photo_file_path(current_photo or filename)
         if file_path:
             import threading
             from tools.exiftool_manager import get_exiftool_manager
@@ -1615,12 +1690,12 @@ class ResultsBrowserWidget(QWidget):
                 daemon=True,
             ).start()
 
-    def _get_photo_file_path(self, filename: str) -> "str | None":
-        """根据 filename 查找照片的绝对文件路径（优先 current_path，其次 original_path）。"""
-        for p in self._filtered_photos:
-            if p.get("filename") == filename:
-                path = p.get("current_path") or p.get("original_path") or ""
-                return path if path and os.path.exists(path) else None
+    def _get_photo_file_path(self, photo_or_filename) -> "str | None":
+        """根据 photo 或 filename 查找照片绝对路径。"""
+        photo = _coerce_photo(photo_or_filename, self._filtered_photos)
+        if photo:
+            path = photo.get("current_path") or photo.get("original_path") or ""
+            return path if path and os.path.exists(path) else None
         return None
 
     @Slot(list)
@@ -1684,14 +1759,15 @@ class ResultsBrowserWidget(QWidget):
 
         # 3. DB 删除
         if self._db:
-            self._db.delete_photo(filename)
+            self._db.delete_photo(_photo_db_key(photo))
 
         # 4. 从内存列表移除
-        self._filtered_photos = [p for p in self._filtered_photos if p.get("filename") != filename]
-        self._all_photos = [p for p in self._all_photos if p.get("filename") != filename]
+        target_identity = _photo_identity(photo)
+        self._filtered_photos = [p for p in self._filtered_photos if _photo_identity(p) != target_identity]
+        self._all_photos = [p for p in self._all_photos if _photo_identity(p) != target_identity]
 
         # 5. 缩略图同步
-        self._thumb_grid.remove_photo(filename)
+        self._thumb_grid.remove_photo(photo)
         self._fullscreen.set_photo_list(self._filtered_photos)
 
         # 6. 跳转逻辑
