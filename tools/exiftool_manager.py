@@ -399,9 +399,15 @@ class ExifToolManager:
         """发送命令到常驻进程并等待结果，返回成功标志"""
         try:
             output = self._send_command(args, timeout)
-            # 简单的错误检测
             decoded = output.decode('utf-8', errors='replace')
-            if "Error" in decoded and "Warning" not in decoded:
+            # 通过 exiftool 的实际更新计数判断成功，避免路径名含"Error"或
+            # 同时出现 Warning+Error 时的误判
+            if '1 image files updated' in decoded or '1 image files created' in decoded:
+                return True
+            if '0 image files updated' in decoded or '0 image files created' in decoded:
+                return False
+            # 回退：exiftool 未输出计数行时（如 XMP sidecar 创建），检查是否有 Error
+            if 'Error' in decoded:
                 return False
             return True
         except Exception:
