@@ -1543,6 +1543,23 @@ class PhotoProcessor:
             if should_update:
                 progress = int((i / total_files) * 100)
                 self._progress(progress)
+
+            # 周期性 GPU 显存清理（每 200 张）
+            # MPS 不像 CUDA 会自动回收，长批次（如 13000 张）会导致显存耗尽
+            if i % 200 == 0:
+                try:
+                    import torch, gc
+                    if torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
+                        self._log(f"  🧹 [第{i}张] MPS 显存已清理", "info")
+                    elif torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        self._log(f"  🧹 [第{i}张] CUDA 显存已清理", "info")
+                    else:
+                        self._log(f"  🧹 [第{i}张] GC 已执行", "info")
+                    gc.collect()
+                except Exception:
+                    pass
             
             result = yolo_item.get('result')
             if result is None:
@@ -1709,7 +1726,8 @@ class PhotoProcessor:
                         h_orig_box = min(h_orig_box, h_orig - y_orig)
                         
                         # 裁剪鸟的区域（保存BGR版本供关键点/飞版/曝光使用）
-                        bird_crop_bgr = orig_img[y_orig:y_orig+h_orig_box, x_orig:x_orig+w_orig_box]
+                        # .copy() 断开对 orig_img 的 view 依赖，使 orig_img 可在 TOPIQ 后提前释放
+                        bird_crop_bgr = orig_img[y_orig:y_orig+h_orig_box, x_orig:x_orig+w_orig_box].copy()
                         
                         # 同样裁剪 mask (如果存在)
                         if bird_mask is not None:
@@ -1803,6 +1821,10 @@ class PhotoProcessor:
                         topiq = scorer.calculate_nima(filepath)
                 except Exception as e:
                     pass  # V3.3: 简化日志，静默 TOPIQ 计算失败
+                finally:
+                    # TOPIQ 计算后立即释放原图（bird_crop_bgr 已是独立 copy，不受影响）
+                    del orig_img
+                    orig_img = None
                 add_photo_stage('topiq', (time.time() - topiq_start) * 1000)
             # V3.8: 移除跳过日志，改用 all_keypoints_hidden 后跳过的情况会少很多
             
